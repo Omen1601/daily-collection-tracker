@@ -9,7 +9,11 @@ from google.oauth2.service_account import Credentials
 # ======================================================
 # APP CONFIG
 # ======================================================
-st.set_page_config(page_title="Daily Collection Tracker", page_icon="💰", layout="wide")
+st.set_page_config(
+    page_title="Daily Collection Tracker",
+    page_icon="💰",
+    layout="wide"
+)
 
 # ======================================================
 # GOOGLE SHEETS CONNECTION
@@ -20,7 +24,8 @@ SCOPE = [
 ]
 
 creds = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"], scopes=SCOPE
+    st.secrets["gcp_service_account"],
+    scopes=SCOPE
 )
 
 gc = gspread.authorize(creds)
@@ -33,10 +38,12 @@ def read_sheet(name):
     ws = SHEET.worksheet(name)
     return pd.DataFrame(ws.get_all_records())
 
+
 def write_sheet(name, df):
     ws = SHEET.worksheet(name)
     ws.clear()
     ws.update([df.columns.tolist()] + df.astype(str).values.tolist())
+
 
 # ======================================================
 # AUTHENTICATION
@@ -44,8 +51,10 @@ def write_sheet(name, df):
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
+
 def load_users():
     return read_sheet("Users")
+
 
 def verify_login(username, password):
     users = load_users()
@@ -53,6 +62,7 @@ def verify_login(username, password):
     if not user.empty and user.iloc[0]["password_hash"] == hash_password(password):
         return True, user.iloc[0]["name"]
     return False, None
+
 
 def change_password(username, old_password, new_password):
     users = load_users()
@@ -63,25 +73,30 @@ def change_password(username, old_password, new_password):
         return True
     return False
 
+
 # ======================================================
-# DATA LOADERS (CACHED)
+# DATA LOADERS
 # ======================================================
 @st.cache_data(ttl=60)
 def load_active_loans():
     return read_sheet("Active_Loans")
 
+
 @st.cache_data(ttl=60)
 def load_completed_loans():
     return read_sheet("Completed_Loans")
+
 
 @st.cache_data(ttl=60)
 def load_collections():
     return read_sheet("Collections")
 
+
 def clear_cache():
     load_active_loans.clear()
     load_completed_loans.clear()
     load_collections.clear()
+
 
 # ======================================================
 # BUSINESS LOGIC
@@ -91,6 +106,7 @@ def save_all_data(active_df, completed_df, collections_df):
     write_sheet("Completed_Loans", completed_df)
     write_sheet("Collections", collections_df)
     clear_cache()
+
 
 def add_loan(party, mobile, total, daily, days, mode):
     active = load_active_loans()
@@ -119,6 +135,7 @@ def add_loan(party, mobile, total, daily, days, mode):
     active = pd.concat([active, new], ignore_index=True)
     save_all_data(active, completed, collections)
     return loan_id
+
 
 def add_collection(loan_id, amount, days_count, payment_mode):
     active = load_active_loans()
@@ -151,22 +168,26 @@ def add_collection(loan_id, amount, days_count, payment_mode):
     collections = pd.concat([collections, newc], ignore_index=True)
     save_all_data(active, completed, collections)
 
+
 # ======================================================
-# LOGIN
+# LOGIN PAGE
 # ======================================================
 def login_page():
     st.title("🔐 Daily Collection Tracker Login")
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-    if st.button("Login"):
-        ok, name = verify_login(u, p)
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login", type="primary"):
+        ok, name = verify_login(username, password)
         if ok:
             st.session_state.authenticated = True
-            st.session_state.username = u
+            st.session_state.username = username
             st.session_state.user_name = name
             st.rerun()
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid username or password")
+
 
 # ======================================================
 # MAIN APP
@@ -179,41 +200,60 @@ def main():
         login_page()
         return
 
+    # ---------- SIDEBAR (ALWAYS VISIBLE) ----------
+    st.sidebar.markdown("### Logged in user")
     st.sidebar.success(f"👤 {st.session_state.user_name}")
+
+    logout_clicked = st.sidebar.button("🚪 Logout")
+
+    if logout_clicked:
+        st.session_state.authenticated = False
+        st.session_state.username = None
+        st.session_state.user_name = None
+        clear_cache()
+        st.rerun()
+
+    st.sidebar.markdown("---")
+
     menu = st.sidebar.selectbox(
         "Menu",
-        ["💸 Give Money", "💰 Collect Money", "📊 Dashboard",
-         "📋 Active Loans", "✅ Completed Loans",
-         "📈 Collection History", "⚙️ Settings"]
+        [
+            "💸 Give Money",
+            "💰 Collect Money",
+            "📊 Dashboard",
+            "📋 Active Loans",
+            "✅ Completed Loans",
+            "📈 Collection History",
+            "⚙️ Settings"
+        ]
     )
 
-    # ---------------- GIVE MONEY ----------------
+    # ---------- GIVE MONEY ----------
     if menu == "💸 Give Money":
         st.header("Give Money to Customer")
 
-        col1, col2 = st.columns(2)
-        with col1:
+        c1, c2 = st.columns(2)
+        with c1:
             party = st.text_input("Customer Name *")
             mobile = st.text_input("Mobile Number *", max_chars=10)
             total = st.number_input("Total Amount (₹) *", min_value=0.0)
-        with col2:
+        with c2:
             daily = st.number_input("Daily Amount (₹) *", min_value=0.0)
             days = st.number_input("Total Days *", min_value=1)
             mode = st.selectbox("Payment Mode *", ["Cash", "UPI", "Other"])
 
         if st.button("💾 Give Money", type="primary"):
             if not party.strip():
-                st.error("Customer name required")
+                st.error("Customer name is required")
             elif not mobile.isdigit() or len(mobile) != 10:
-                st.error("Enter valid 10-digit mobile number")
+                st.error("Enter a valid 10-digit mobile number")
             elif total <= 0 or daily <= 0:
                 st.error("Amounts must be greater than 0")
             else:
                 loan_id = add_loan(party, mobile, total, daily, days, mode)
-                st.success(f"Loan created: {loan_id}")
-                st.balloons()
+                st.success(f"Loan created successfully (Loan ID: {loan_id})")
 
-    # ---------------- COLLECT MONEY ----------------
+    # ---------- COLLECT MONEY ----------
     elif menu == "💰 Collect Money":
         active = load_active_loans()
         if not active.empty:
@@ -234,18 +274,17 @@ def main():
 
             if st.button("Collect Payment", type="primary"):
                 if amt <= 0:
-                    st.error("Amount must be > 0")
+                    st.error("Amount must be greater than 0")
                 elif amt > loan["Remaining_Amount"]:
                     st.error("Cannot exceed remaining amount")
                 else:
                     add_collection(loan_id, amt, days, mode)
-                    st.success("Payment collected")
-                    st.balloons()
+                    st.success("Payment collected successfully")
                     st.rerun()
         else:
             st.info("No active loans")
 
-    # ---------------- DASHBOARD ----------------
+    # ---------- DASHBOARD ----------
     elif menu == "📊 Dashboard":
         active = load_active_loans()
         collections = load_collections()
@@ -259,38 +298,43 @@ def main():
         c2.metric("Total Collected", f"₹{total_collected:,.2f}")
         c3.metric("Remaining", f"₹{remaining:,.2f}")
 
-    # ---------------- ACTIVE LOANS ----------------
+    # ---------- ACTIVE LOANS ----------
     elif menu == "📋 Active Loans":
         st.dataframe(load_active_loans(), use_container_width=True)
 
-    # ---------------- COMPLETED LOANS ----------------
+    # ---------- COMPLETED LOANS ----------
     elif menu == "✅ Completed Loans":
         st.dataframe(load_completed_loans(), use_container_width=True)
 
-    # ---------------- COLLECTION HISTORY ----------------
+    # ---------- COLLECTION HISTORY ----------
     elif menu == "📈 Collection History":
         df = load_collections()
         if not df.empty:
             df["Date"] = pd.to_datetime(df["Date"])
-            start, end = st.date_input("Date Range", [df["Date"].min().date(), df["Date"].max().date()])
+            start, end = st.date_input(
+                "Date Range",
+                [df["Date"].min().date(), df["Date"].max().date()]
+            )
             filtered = df[(df["Date"].dt.date >= start) & (df["Date"].dt.date <= end)]
-            st.success(f"Total: ₹{filtered['Amount_Collected'].astype(float).sum():,.2f}")
+            st.success(f"Total Collected: ₹{filtered['Amount_Collected'].astype(float).sum():,.2f}")
             st.dataframe(filtered, use_container_width=True)
         else:
-            st.info("No data")
+            st.info("No collection data")
 
-    # ---------------- SETTINGS ----------------
+    # ---------- SETTINGS ----------
     elif menu == "⚙️ Settings":
         st.subheader("Change Password")
         old = st.text_input("Old Password", type="password")
         new = st.text_input("New Password", type="password")
+
         if st.button("Change Password"):
             if len(new) < 6:
                 st.error("Password must be at least 6 characters")
             elif change_password(st.session_state.username, old, new):
-                st.success("Password updated")
+                st.success("Password changed successfully")
             else:
-                st.error("Incorrect password")
+                st.error("Old password is incorrect")
+
 
 if __name__ == "__main__":
     main()
